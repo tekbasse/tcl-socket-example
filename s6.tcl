@@ -14,6 +14,10 @@ array set denyHosts {}
 
 # Set default passmap to: foo/bar, spong/wibble
 # set default handlerCmd to execCommand
+# Ben adding:
+# hostname: hostname for telnet emulation
+# username(client): username provided for authentication
+# auth_input_count(client): count of login attempts
 proc telnetServer {port {passmap {foo bar spong wibble}} {handlerCmd execCommand}} {
     puts stdout "start*** telnetServer"
     if {$port == 0} {
@@ -53,7 +57,7 @@ proc closedownServer {server} {
 ## Handle an incoming connection to the given server
 proc connect {serverport handlerCmd client clienthost clientport} {
     puts stdout "start*** connect"
-    global auth cmd denyHosts connections hostname username
+    global auth cmd denyHosts connections
     if {[info exist denyHosts($clienthost)]} {
         puts stdout "${clienthost}:${clientport} attempted connection"
         catch {puts $client "Connection denied"}
@@ -86,72 +90,113 @@ proc disconnect {client} {
 ## Handle data sent from the client.  Log-in is handled directly by this
 ## procedure, and requires the name and password on the same line
 proc handle {serverport client} {
-    global passwords auth cmd username
+    global passwords auth cmd hostname username auth_input_count
     puts stdout "start*** handle serverport '${serverport}' client '${client}'"
-    if { ![info exists username($client)] } {
-	catch {puts -nonewline $client "${hostname} login: "}
-    } else {
-	catch {puts -nonewline $client "Password: "}
-    }
-    
-    if {[gets $client line] < 0} {
-        disconnect $client
-	puts stdout "end***** handle via L87"
-        return
-    }
-    if {[string equal $line "quit"] || [string equal $line "exit"]} {
-        disconnect $client
-	puts stdout "end***** handle via L92"
-        return
-    }
-    if {$auth($client)} {
-	# If logged in, interpret input as follows:
-        eval $cmd($client) [list $client $line 0]
-        eval $cmd($client) [list $client $line 1]
-	puts stdout "end***** handle via L100"
-        return
-    }
+    while { 1 } {
+	# User needs to send a return to flush/synchronize the buffer
+	if { ![info exist auth_input_count($client)] } {
+	    set auth_input_count($client) 0
+	}
+	if { $auth_input_count($client) == 0 } {
+	    if {[gets $client line] < 0} {
+		disconnect $client
+		puts stdout "end***** handle via L87"
+		return
+	    }
+	}
+	# Puts appropriate prompt
+	if {$auth($client)} {
+	    # If logged in, interpret input as follows:
+	    eval $cmd($client) [list $client $line 0]
+	    eval $cmd($client) [list $client $line 1]
+	    puts stdout "end***** handle via L100"
+	    return
+	} else {
+	    set prompt_username_p 1
+	    puts stdout "prompt_username_p $prompt_username_p"
+	    if { ![info exists username($client)] } {
+		#catch {puts -nonewline $client "${hostname} login: "}
+		puts -nonewline $client "${hostname} login: "
+	    } else {
+		set prompt_username_p 0
+		#catch {puts -nonewline $client "Password: "}
+		puts -nonewline $client "Password(116): "
+	    }
+	    puts stdout "prompt_username_p $prompt_username_p"
+	}
 
-    # Following splits $line into id and pass vars
-    foreach {id pass} [split $line] {break}
-    
-    if {![info exist pass]} {
-	# this case appears to be triggered if there is no password
-	# supplied for a user account. Yet I have not been able to trigger it..
-	# It triggers now.. I've changed the logic.. but
-	# It needs to switch between username/password also..
-	#### Add username/password prompt paradigm here
-        catch {puts -nonewline $client "Login (handle): "}
-	puts stdout "end***** handle via L104"
-        return
-    }
+	if {[gets $client line] < 0} {
+	    disconnect $client
+	    puts stdout "end***** handle via L87"
+	    return
+	}
 
-    #### authentication logic
-    if {
-        [info exist passwords($serverport,$id)] &&
-        [string equal $passwords($serverport,$id) $pass]
-    } then {
-        set auth($client) 1
-        puts stdout "$id logged in on $client"
-        catch {puts $client "Welcome, $id!"}
-        eval $cmd($client) [list $client $line 1]
-	puts stdout "end***** handle via L115"
-        return
-    }
-    if {
-        $pass eq "" && [info exist username($client)]
-    } then {
-	# get password
-	puts stdout "ask for password"
-	catch {puts -nonewline $client "Password: "}
-    }
-    if { ![info exist username($client)] } then {
-	set username($serverport) $id
-    } else {
-	puts stdout "AUTH FAILURE ON $client"
-	catch {puts $client "Unknown name or password"}
-	disconnect $client
-	puts stdout "end***** handle"
+	# Get input as 'line'
+	puts stdout "line: '$line'"
+	#if {[string equal $line "quit"] || [string equal $line "exit"]} {
+	#    disconnect $client
+	#	puts stdout "end***** handle via L92"
+	#    return
+	#}
+
+	# Following splits $line into id and pass vars
+	#foreach {id pass} [split $line] {break}
+	# Replaced with:
+	if { $prompt_username_p } {
+	    set username($client) $line
+	    set id $line
+	} else {
+	    set id username($client)
+	    set pass $line
+	}
+	
+	if {![info exist pass]} {
+	    # this case is triggered when there is no password
+	    # supplied for a user account.
+	    
+	    #catch {puts -nonewline $client "Login (handle): "}
+	    puts -nonewline $client "Password: "
+	    if {[gets $client pass] < 0} {
+		disconnect $client
+	    }
+	    # Don't return until after authentication process
+	    #puts stdout "end***** handle via L135"
+	    #return
+	}
+
+
+	# Authenticate
+	set auth_input_count($client) [expr { $auth_input_count($client) + 1 } ]
+	
+	if {
+	    [info exist passwords($serverport,$id)] &&
+	    [string equal $passwords($serverport,$id) $pass]
+	} then {
+	    set auth($client) 1
+	    puts stdout "$id logged in on $client"
+	    catch {puts $client "Welcome, $id!"}
+	    eval $cmd($client) [list $client $line 1]
+	    puts stdout "end***** handle via L151"
+	    return
+	}
+	if { ![info exist username($client)] } then {
+	    puts stdout "end***** handle via L171"
+	    set username($client) $id
+	    # return
+	} else {
+	    puts stdout "AUTH FAILURE ON $client"
+	    catch {puts $client "Unknown name or password"}
+	    unset username($client)
+	    if { $auth_input_count($client) > 5 } {
+		puts $client "Too many login attempts. Try again later."
+		unset auth_input_count($client)
+		disconnect $client
+		puts stdout "end***** handle"
+	    }
+	}
+	unset id
+	unset pass
+	puts stdout "end***** hanble via L181"
     }
 }
 
@@ -161,7 +206,8 @@ proc execCommand {client line prompt} {
 
     global tcl_platform hostname username
     if {$prompt ==  1} {
-        catch {puts -nonewline $client "\$ "}
+        #catch {puts -nonewline $client "\$ "}
+	puts -nonewline $client "\$ "
 	puts stdout "end***** execCommand via L130"
         return
     }
