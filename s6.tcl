@@ -91,6 +91,7 @@ proc disconnect {client} {
 ## procedure, and requires the name and password on the same line
 proc handle {serverport client} {
     global passwords auth cmd hostname username auth_input_count
+    set tries_max 5
     puts stdout "start*** handle serverport '${serverport}' client '${client}'"
     while { 1 } {
 	# User needs to send a return to flush/synchronize the buffer
@@ -185,10 +186,10 @@ proc handle {serverport client} {
 	    # return
 	} else {
 	    puts stdout "AUTH FAILURE ON $client"
-	    catch {puts $client "Unknown name or password"}
+	    catch {puts $client "Login incorrect"}
 	    unset username($client)
-	    if { $auth_input_count($client) > 5 } {
-		puts $client "Too many login attempts. Try again later."
+	    if { $auth_input_count($client) >= $tries_max } {
+		puts $client "Maximum number of tries exceeded (${tries_max})"
 		unset auth_input_count($client)
 		disconnect $client
 		puts stdout "end***** handle"
