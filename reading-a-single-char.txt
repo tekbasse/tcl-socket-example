@@ -1,0 +1,39 @@
+# From https://wiki.tcl-lang.org/page/Reading+a+single+character+from+the+keyboard+using+Tcl
+
+Reading a single character from the keyboard using Tcl
+DKF 2005-09-08 PYK 2012-11-19:
+
+How to read a single character from the keyboard using just Tcl? (It's pretty easy using a Tk GUI, of course!) Why doesn't just doing [read stdin 1] work?
+
+Well, in fact it does work, but only if the terminal isn't working in line-editing mode. In line-editing mode, the OS terminal engine only sends the text to the applications once the user presses the return key. Guess what mode the terminal is in by default? :^/
+
+In line-editing mode (at least on Unix-like systems), the operating system is doing things like buffering up the data (to make I/O more efficient, providing for functionality like backspacing (perhaps ^H/^?), interruption signaling (perhaps ^C/^?), word deletion, line deletion, line refresh, literal quoting (perhaps ^V), and more. The buffering, for example, means that an application cannot get any input until the user has pressed the Enter/Return type key. Normally, you want this type of pre-processing - these are the things that, at a command line, an application doesn't want to have to worry about. However, often in a text user interface, you want more control than that.
+
+(A little terminology. We're trying to switch things to raw mode here so we can read the "raw" keystrokes, with the default line-editing mode often called cooked mode by contrast.)
+
+Raw Mode on Unix
+Use the term module in tcllib
+
+package require term
+::term::ansi::ctrl::unix::raw
+Alternatively, Unix platforms (e.g. Linux, Solaris, MacOS X, AIX, and even Cygwin, etc.) you can use the stty program to turn raw mode on and off, like this:
+
+exec /bin/stty raw <@stdin
+set c [read stdin 1]
+exec /bin/stty -raw <@stdin
+(We use <@stdin because stty works out what terminal to work with using standard input on some platforms. On others it prefers /dev/tty instead, but putting in the redirection makes the code more portable.)
+
+However, it is usually a good idea to turn off echoing of characters in raw mode. It means that you're responsible for everything, but that's often what you want anyway. Wrapping things up in some procedures, we get this:
+
+proc enableRaw {{channel stdin}} {
+   exec /bin/stty raw -echo <@$channel
+}
+proc disableRaw {{channel stdin}} {
+   exec /bin/stty -raw echo <@$channel
+}
+
+enableRaw
+set c [read stdin 1]
+puts -nonewline $c
+disableRaw
+Raw Mode
